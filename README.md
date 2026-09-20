@@ -1,27 +1,20 @@
-# invaris-verify
+# Invaris Verify
 
-An autonomous AI agent that pays for the tools and data it uses, and sells its own inference the same way — with cryptographic proof that the output actually came from the model it claims to.
+### The trust layer for the AI agent economy
 
-## Why this project
+Invaris Verify is infrastructure for a world where AI agents transact directly with each other: it lets one agent pay another per call, and lets the payer cryptographically verify that what it received actually came from the model — and only the model — it paid for.
 
-AI x crypto has shifted in 2026 from speculative token narratives toward real infrastructure. Two things are converging:
+## The problem
 
-- **Agentic payments** — Coinbase's [x402](https://docs.cdp.coinbase.com/x402/) protocol lets an AI agent pay for an API call in the moment, using the HTTP 402 status code: a server quotes a price in a stablecoin, the agent checks it against its own budget, and a facilitator settles the payment on-chain.
-- **Verifiable inference** — as agents start moving real money based on model outputs, "trust me" is no longer good enough. Running inference inside a trusted execution environment (or producing a ZKML proof) lets a caller verify that a specific model produced a specific output for a specific input.
+AI agents are starting to spend real money on each other's behalf — buying tool calls, data, and inference without a human approving each transaction. Two pieces of infrastructure this depends on both have a hole in them today.
 
-This project builds a small agent economy around both ideas: a consumer agent that shops for and pays for tools within a budget, and a provider agent that sells verifiable inference per call.
+**Payment without accountability.** Coinbase's x402 protocol has made per-call, agent-native payment real: a server quotes a price over HTTP 402 and settles in stablecoin in the same request. But payment alone says nothing about what was delivered. An independent Artemis analysis, cited by CoinDesk in March 2026, found that roughly half of observed x402 transaction volume looks like wash trading rather than genuine commerce — evidence that the rail exists before the trust layer that would make it worth using at scale.
 
-## How it works
+**Inference without proof.** Buyers of AI inference — human or agent — have no way to confirm a provider actually ran the model it's charging for. A provider under margin pressure can silently swap in a cheaper model, and nothing on the wire tells the buyer the difference. As agents start making autonomous purchasing decisions based on model output, that's not a minor quality issue — it's a fraud surface with no audit trail.
 
-1. A **consumer agent** decides it needs something — a tool call, a dataset, or a model's inference — and finds a provider endpoint for it.
-2. It sends a request. The provider replies `HTTP 402 Payment Required` with a price quoted in a stablecoin (USDC).
-3. The consumer checks the price against its own budget logic. If it's within budget, it authorizes payment.
-4. A **facilitator** verifies the payment is valid and settles it on-chain, then signals the provider to proceed.
-5. The **provider agent** runs the request — for inference, inside a Trusted Execution Environment (TEE) or with a ZKML proof generator attached — and returns both the output and a cryptographic attestation of how it was produced.
-6. The consumer (or anyone downstream) can independently verify that attestation: this output really did come from the claimed model, running unmodified, on the claimed input.
-7. The transaction — payment plus attestation — is logged, so there's an auditable trail of who paid whom for what, and what was actually delivered.
+## The solution
 
-## Architecture
+Invaris Verify combines both problems into one protocol: an x402-native payment layer and a verifiable-inference layer. A **consumer agent** shops for tools, data, or inference within a budget it controls. A **provider agent** sells its own inference and backs every response with a cryptographic attestation — from a Trusted Execution Environment or a ZKML proof — that the output came from the exact model it claims to be running. Payment and proof settle together and log on-chain, so every transaction carries its own audit trail.
 
 ```
 Consumer agent (budgeted wallet)
@@ -39,51 +32,73 @@ Provider agent (runs the model inside a TEE, signs an attestation)
 Verified response (output + proof, logged on-chain) ──▶ back to consumer
 ```
 
-## Key concepts
+## How it works
 
-- **x402** — an open payment protocol built on the long-unused HTTP 402 status code. A server names its price in-band with the request itself, instead of requiring a pre-negotiated API key or subscription.
-- **Facilitator** — a service that verifies a payment claim and settles it on-chain (e.g. USDC transfer on Base) so the provider doesn't have to run its own blockchain infrastructure.
-- **TEE (Trusted Execution Environment)** — a hardware-isolated enclave (e.g. via Phala Cloud or Marlin) that runs the model and can cryptographically attest "this exact code, on this exact input, produced this exact output," without the hosting party being able to tamper with it.
-- **ZKML (Zero-Knowledge Machine Learning)** — an alternative to TEEs: a mathematical proof (e.g. via EZKL) that a specific model produced a specific output, verifiable without trusting any hardware or hosting party at all.
-- **Attestation** — the signed proof (from a TEE or a ZK circuit) that accompanies a model's output, letting the buyer verify authenticity after the fact.
+1. A **consumer agent** decides it needs something — a tool call, a dataset, or a model's inference — and finds a provider endpoint for it.
+2. It sends a request. The provider replies `HTTP 402 Payment Required` with a price quoted in a stablecoin (USDC).
+3. The consumer checks the price against its own budget logic and, if it's within budget, authorizes payment.
+4. A **facilitator** verifies the payment is valid and settles it on-chain, then signals the provider to proceed.
+5. The **provider agent** runs the request — for inference, inside a TEE or with a ZKML proof generator attached — and returns both the output and a cryptographic attestation of how it was produced.
+6. The consumer, or anyone downstream, independently verifies that attestation: this output really did come from the claimed model, running unmodified, on the claimed input.
+7. The transaction — payment plus attestation — is logged, producing an auditable trail of who paid whom for what, and what was actually delivered.
 
-## Practical use cases
+## Why now
 
-- **Pay-per-call financial research.** A trading bot needs a market analysis before it risks real capital on a trade. Instead of trusting an unverifiable API response, it pays a few cents via x402 for one inference call and gets back an attestation proving the analysis came from the specific model it's paying for — not a cheaper model quietly swapped in to save the provider money.
-- **Agent-to-agent subcontracting.** A general-purpose "project manager" agent breaks a task into specialized subtasks — translation, code review, image generation — and hires specialist agents on the open market for each one, paying per completed task instead of requiring a pre-negotiated contract or API key with every specialist it might ever need.
-- **Autonomous, per-query data purchasing.** A research agent needs one query against a paywalled dataset (legal case law, satellite imagery, proprietary market data). Rather than committing to a monthly subscription it may barely use, it pays x402-style for exactly the queries it makes.
-- **Compliance-sensitive AI outputs.** In legal, medical, or financial-advice contexts, a regulator or auditor may need to trace exactly which model version produced a given output. TEE or ZKML attestation gives that output an audit trail, which matters for liability once an AI-generated recommendation is challenged.
-- **Anti "model downgrade" protection.** Enterprises paying for a premium AI API today have no way to verify the vendor is actually running the model they're being billed for, rather than a cheaper substitute swapped in silently to cut costs. Verifiable inference is a trust layer that can be sold on top of any inference vendor.
-- **Micro-monetization for indie model builders.** A solo developer fine-tunes a niche model — say, a legal-clause classifier — and has no reason to build a full subscription/billing system for it. x402 lets them monetize per call from day one, with a facilitator handling settlement.
-- **Verified sensor and IoT data marketplaces.** Drones, weather stations, or supply-chain sensors sell data streams to any paying agent; TEE attestation guarantees the data was captured and reported without being altered before sale.
-- **Audit infrastructure for autonomous decision-making.** A company running agents that trade, procure, or handle customer service needs an immutable record of what model, running where, produced which decision — the payment log plus attestation trail doubles as that audit record for SOC2 or regulatory review.
-- **Cross-organization agent collaboration without contracts.** Two companies' agents can transact ad hoc — e.g. one company's research agent buying inference time on another company's fine-tuned model — using x402 as the trust and settlement layer instead of negotiating a formal API agreement first.
+Three trends are converging in 2026 that weren't all true two years ago: agent-native payment rails exist and are live on multiple chains, with x402 now backed by a dedicated Coinbase/Cloudflare foundation; TEE-based confidential inference (Phala, Marlin) and ZKML proving (EZKL) have both moved from research curiosity to usable infrastructure; and AI agents are increasingly given real budgets and real autonomy to transact without a human in the loop. The payment rail got built first. The trust layer is still open — that's the gap Invaris Verify is built to close.
 
-## Market context
+## Market opportunity
 
-x402's adoption is still early: as of March 2026, reported daily transaction volume sits around $28,000 with average payments near $0.20, and independent analysis suggests a meaningful share of on-chain activity is wash trading rather than genuine commerce. That's not a reason to dismiss the idea — the underlying need (per-call payment, verifiable output) is real — but it does mean this project is a bet on helping define the killer use case rather than riding an already-proven wave.
+- The agentic AI market is projected to grow from **$19.33B in 2026 to $205.88B by 2033** (40.2% CAGR) — MarketsandMarkets.
+- The agentic commerce segment specifically is forecast to grow from **$547.3M in 2025 to $5.2B by 2033** (32.5% CAGR) — Grand View Research.
+- McKinsey projects the broader agentic commerce market could reach **$5 trillion by 2030**, with AI systems handling 15–25% of U.S. e-commerce transactions; Morgan Stanley separately estimates U.S. agentic-shopper spend at **$190B–$385B by 2030**.
 
-## Roadmap
+Every dollar an agent spends autonomously needs a payment rail, and increasingly, a reason to trust what it bought. Invaris Verify is built for the second half of that problem — the part payment rails alone don't solve.
 
-- [ ] Stand up wallets and a working x402 payment (testnet, Base Sepolia)
-- [ ] Build the consumer agent (budget-aware, tool-selecting)
-- [ ] Build the provider side — sell inference behind an x402-gated endpoint
-- [ ] Add verifiability — TEE attestation (Phala / Marlin) or a ZKML proof (EZKL) on the provider side
-- [ ] Log transactions and add a small dashboard for payment + verification flow
-- [ ] Optional: on-chain Solidity contract (reputation registry or attestation-gated escrow)
-- [ ] Polish: public testnet demo, technical writeup, short demo video
+## Product status
 
-## Tech stack (planned)
+This is an early-stage, pre-product company, building in public.
+
+- [`docs/roadmap.md`](docs/roadmap.md) — the phased plan from proof of concept to mainnet
+- [`docs/poc.md`](docs/poc.md) — the proof of concept currently in progress
+- [`docs/mvp.md`](docs/mvp.md) — the MVP scope that follows it
+
+Nothing here is inflated: there is no live product, no users, and no revenue yet. What exists is a validated architecture, a scoped build plan, and a founder with direct prior experience in every layer this requires.
+
+## Why Invaris Verify, and why now
+
+I've built each piece of this system before, separately, not as a thought experiment. As a Research Engineer on Ethereum protocol teams, I maintain nim-libp2p, authored the RFC and Go proof-of-concept for Logos Capability Discovery on Kademlia DHT, and built a discv5 crawler that logs live Ethereum mainnet node IDs — the peer discovery and networking layer this kind of marketplace runs on. I've published two first-author IEEE papers on Ethereum Data Availability Sampling. During an MLH Fellowship at Solana Labs I built a Python SDK for the DeFi platform Zeta, handling SPL token transfers and order settlement — the payment layer. And I've shipped an enterprise RAG platform with JWT/RBAC/SSO access control and citation-grounded, streaming inference — the verified-serving layer.
+
+Most people building in this space specialize in one of payments, protocol networking, or AI serving. I've shipped in all three, which is exactly the combination this problem needs.
+
+## Business model (planned)
+
+- **Facilitator take-rate** — a small percentage fee on payments settled through the Invaris facilitator, in line with how payment rails have historically monetized.
+- **Verification-as-a-service** — enterprises buying AI inference from any vendor, not only from agents on this marketplace, can pay for attestation as a standalone trust layer independent of whether that vendor's payment runs through x402 at all.
+- **Provider tooling** — paid tooling for providers who want to list verifiable inference endpoints without building the TEE/attestation integration themselves.
+
+None of this is live yet; it's the monetization path the architecture is built to support once there's real transaction volume to take a percentage of.
+
+## Competitive landscape
+
+- **Payment-only infrastructure** (x402 facilitators, agent wallet providers) makes agent-to-agent payment possible but says nothing about what was actually delivered.
+- **Verification-only infrastructure** (TEE cloud providers, ZKML tooling) can prove what a model produced but isn't wired into a payment flow — it's a primitive, not a marketplace.
+- Invaris Verify sits at the intersection. Nobody today is shipping payment and proof as one product, which is the combination agent-to-agent commerce actually needs once real money is on the line.
+
+## Risks, stated plainly
+
+- **Market timing risk.** x402 volume is still small and partly synthetic (see "The problem" above) — this is a bet on a market that hasn't fully arrived yet.
+- **Infrastructure maturity risk.** TEE attestation and ZKML tooling are usable but still early; integration cost and reliability at scale are unproven.
+- **Regulatory risk.** Stablecoin-denominated machine-to-machine payments sit in a still-evolving regulatory environment.
+
+We'd rather state these plainly than pretend they don't exist. See [`docs/roadmap.md`](docs/roadmap.md) for how the build is sequenced to de-risk them one at a time, starting with the smallest possible working proof.
+
+## Tech stack
 
 - **Agents:** LangChain / LangGraph or CrewAI (or a hand-rolled tool-use loop)
 - **Payments:** x402 protocol, Coinbase CDP AgentKit, USDC on Base Sepolia (testnet)
 - **Verifiability:** Phala Cloud or Marlin (TEE attestation), optionally EZKL (ZKML)
 - **Contracts (optional):** Solidity, Foundry
-- **Frontend:** lightweight dashboard for transaction + verification visibility
-
-## Status
-
-Early scaffolding. README and roadmap only — implementation in progress.
+- **Frontend:** lightweight dashboard for transaction and verification visibility
 
 ## License
 
@@ -100,3 +115,5 @@ MIT
 - [Algorand Builders Berlin: Agentic Commerce x402 Hackathon](https://luma.com/agentic-commerce-hack)
 - [Tether Launches Developer Grants Program to Fund Local-First AI and Payments Infrastructure](https://tether.io/news/tether-launches-developer-grants-program-to-fund-local-first-ai-and-payments-infrastructure/)
 - [Phala — Confidential AI Cloud / Private Inference on GPU TEE](https://phala.com/)
+- [Agentic AI Market Report — MarketsandMarkets](https://www.marketsandmarkets.com/Market-Reports/agentic-ai-market-208190735.html)
+- [Agentic Commerce Market Size & Growth Forecasts — Grand View Research, via Sanbi](https://sanbi.ai/blog/agentic-shopping-market-trends)
